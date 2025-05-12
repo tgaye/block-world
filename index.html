@@ -1,0 +1,378 @@
+<!DOCTYPE html><html><head><meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Block World</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            font-family: Arial, sans-serif;
+        }
+        #game-container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+        }
+        #start-screen {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.7);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            color: white;
+            z-index: 100;
+        }
+        #start-button {
+            padding: 15px 30px;
+            font-size: 20px;
+            background: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            margin-top: 20px;
+        }
+        #hotbar {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            background: rgba(0, 0, 0, 0.5);
+            padding: 10px;
+            border-radius: 10px;
+            z-index: 10;
+        }
+        .hotbar-slot {
+            width: 50px;
+            height: 50px;
+            margin: 0 5px;
+            border: 2px solid #444;
+            background: #333;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            cursor: pointer;
+        }
+        .hotbar-slot.selected {
+            border-color: white;
+        }
+        .block-preview {
+            width: 40px;
+            height: 40px;
+        }
+        #instructions {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: white;
+            background: rgba(0, 0, 0, 0.5);
+            padding: 10px;
+            border-radius: 5px;
+            z-index: 10;
+        }
+        canvas {
+            display: block;
+        }
+    </style>
+
+<base target="_self">
+
+
+    </head><body><div id="game-container">
+        <div id="start-screen">
+            <h1>Block World</h1>
+            <p>A simple 3D block building game</p>
+            <button id="start-button">Start Game</button>
+            <div style="margin-top: 30px;">
+                <h3>Controls:</h3>
+                <p>WASD: Move</p>
+                <p>Mouse: Look around</p>
+                <p>Left Click: Mine block</p>
+                <p>Right Click: Place block</p>
+                <p>1-5: Select block type</p>
+            </div>
+        </div>
+        <div id="instructions">
+            <p>WASD: Move | Mouse: Look | LMB: Mine | RMB: Place | 1-5: Select Block</p>
+        </div>
+        <div id="hotbar">
+            <div class="hotbar-slot selected" data-block="0">
+                <div class="block-preview" style="background-color: #8B4513;"></div>
+            </div>
+            <div class="hotbar-slot" data-block="1">
+                <div class="block-preview" style="background-color: #696969;"></div>
+            </div>
+            <div class="hotbar-slot" data-block="2">
+                <div class="block-preview" style="background-color: #228B22;"></div>
+            </div>
+            <div class="hotbar-slot" data-block="3">
+                <div class="block-preview" style="background-color: #B8860B;"></div>
+            </div>
+            <div class="hotbar-slot" data-block="4">
+                <div class="block-preview" style="background-color: #1E90FF;"></div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/FirstPersonControls.js"></script>
+    <script>
+        // Game variables
+        let scene, camera, renderer, controls;
+        let world = [];
+        const worldSize = 32;
+        const blockSize = 1;
+        let selectedBlock = 0;
+        let raycaster = new THREE.Raycaster();
+        let mouse = new THREE.Vector2();
+        let clock = new THREE.Clock();
+        let lastTime = 0;
+        let gameStarted = false;
+
+        // Block types
+        const blockTypes = [
+            { color: 0x8B4513, name: "Dirt" },    // Brown
+            { color: 0x696969, name: "Stone" },   // Gray
+            { color: 0x228B22, name: "Grass" },   // Green
+            { color: 0xB8860B, name: "Wood" },     // Gold
+            { color: 0x1E90FF, name: "Water" }     // Blue
+        ];
+
+        // Initialize the game
+        function init() {
+            // Set up Three.js scene
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x87CEEB); // Sky blue
+            
+            // Set up camera
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.y = 10;
+            
+            // Set up renderer
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            document.getElementById('game-container').appendChild(renderer.domElement);
+            
+            // Add lights
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+            scene.add(ambientLight);
+            
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            directionalLight.position.set(1, 1, 1);
+            scene.add(directionalLight);
+            
+            // Generate world
+            generateWorld();
+            
+            // Set up controls
+            controls = new THREE.FirstPersonControls(camera, renderer.domElement);
+            controls.movementSpeed = 5;
+            controls.lookSpeed = 0.1;
+            controls.lookVertical = true;
+            
+            // Event listeners
+            window.addEventListener('resize', onWindowResize);
+            document.addEventListener('mousedown', onMouseDown);
+            document.addEventListener('keydown', onKeyDown);
+            document.getElementById('start-button').addEventListener('click', startGame);
+            
+            // Hotbar selection
+            document.querySelectorAll('.hotbar-slot').forEach(slot => {
+                slot.addEventListener('click', () => {
+                    document.querySelectorAll('.hotbar-slot').forEach(s => s.classList.remove('selected'));
+                    slot.classList.add('selected');
+                    selectedBlock = parseInt(slot.getAttribute('data-block'));
+                });
+            });
+            
+            // Start game loop
+            animate();
+        }
+        
+        // Generate the world
+        function generateWorld() {
+            // Clear existing blocks
+            world.forEach(block => {
+                scene.remove(block.mesh);
+            });
+            world = [];
+            
+            // Create flat world with some hills
+            for (let x = 0; x < worldSize; x++) {
+                for (let z = 0; z < worldSize; z++) {
+                    // Base height
+                    let height = 5;
+                    
+                    // Add some hills
+                    const distanceToCenter = Math.sqrt(Math.pow(x - worldSize/2, 2) + Math.pow(z - worldSize/2, 2));
+                    height += Math.max(0, 10 - distanceToCenter / 3);
+                    
+                    // Add some random variation
+                    height += Math.floor(Math.random() * 3);
+                    
+                    // Create blocks
+                    for (let y = 0; y < height; y++) {
+                        let blockType = 0; // Dirt by default
+                        
+                        // Top layer is grass
+                        if (y === height - 1) {
+                            blockType = 2; // Grass
+                        } 
+                        // Bottom layers are stone
+                        else if (y < height - 3) {
+                            blockType = 1; // Stone
+                        }
+                        
+                        createBlock(x, y, z, blockType);
+                    }
+                }
+            }
+            
+            // Add water layer
+            for (let x = 0; x < worldSize; x++) {
+                for (let z = 0; z < worldSize; z++) {
+                    createBlock(x, 0, z, 4); // Water
+                }
+            }
+        }
+        
+        // Create a block at given coordinates
+        function createBlock(x, y, z, type) {
+            const geometry = new THREE.BoxGeometry(blockSize, blockSize, blockSize);
+            const material = new THREE.MeshLambertMaterial({ color: blockTypes[type].color });
+            const cube = new THREE.Mesh(geometry, material);
+            
+            cube.position.x = x;
+            cube.position.y = y;
+            cube.position.z = z;
+            
+            scene.add(cube);
+            
+            // Store block data
+            world.push({
+                mesh: cube,
+                x: x,
+                y: y,
+                z: z,
+                type: type
+            });
+        }
+        
+        // Handle mouse clicks
+        function onMouseDown(event) {
+            if (!gameStarted) return;
+            
+            // Calculate mouse position in normalized device coordinates
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+            
+            // Update the raycaster
+            raycaster.setFromCamera(mouse, camera);
+            
+            // Check for intersections with blocks
+            const intersects = raycaster.intersectObjects(world.map(block => block.mesh));
+            
+            if (intersects.length > 0) {
+                const intersect = intersects[0];
+                const block = world.find(b => b.mesh === intersect.object);
+                
+                if (event.button === 0) { // Left click - mine block
+                    // Remove the block
+                    scene.remove(block.mesh);
+                    world = world.filter(b => b !== block);
+                } 
+                else if (event.button === 2) { // Right click - place block
+                    // Calculate position for new block
+                    const normal = intersect.face.normal;
+                    const newX = block.x + normal.x;
+                    const newY = block.y + normal.y;
+                    const newZ = block.z + normal.z;
+                    
+                    // Check if position is empty
+                    const existingBlock = world.find(b => b.x === newX && b.y === newY && b.z === newZ);
+                    
+                    if (!existingBlock && newY >= 0 && newY < 20 && 
+                        newX >= 0 && newX < worldSize && 
+                        newZ >= 0 && newZ < worldSize) {
+                        createBlock(newX, newY, newZ, selectedBlock);
+                    }
+                }
+            }
+        }
+        
+        // Handle keyboard input
+        function onKeyDown(event) {
+            if (!gameStarted) return;
+            
+            // Hotbar selection
+            if (event.key >= '1' && event.key <= '5') {
+                const slotIndex = parseInt(event.key) - 1;
+                if (slotIndex < blockTypes.length) {
+                    selectedBlock = slotIndex;
+                    document.querySelectorAll('.hotbar-slot').forEach(s => s.classList.remove('selected'));
+                    document.querySelector(`.hotbar-slot[data-block="${slotIndex}"]`).classList.add('selected');
+                }
+            }
+        }
+        
+        // Start the game
+        function startGame() {
+            document.getElementById('start-screen').style.display = 'none';
+            gameStarted = true;
+            controls.lock();
+        }
+        
+        // Handle window resize
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            controls.handleResize();
+        }
+        
+        // Game loop
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            const delta = clock.getDelta();
+            const time = clock.getElapsedTime();
+            
+            if (gameStarted) {
+                controls.update(delta);
+                
+                // Simple day/night cycle
+                const lightIntensity = 0.5 + Math.sin(time * 0.2) * 0.3;
+                scene.children.forEach(child => {
+                    if (child instanceof THREE.DirectionalLight) {
+                        child.intensity = lightIntensity;
+                    }
+                });
+            }
+            
+            renderer.render(scene, camera);
+            lastTime = time;
+        }
+        
+        // Prevent context menu on right click
+        document.addEventListener('contextmenu', event => {
+            if (gameStarted) {
+                event.preventDefault();
+            }
+        });
+        
+        // Initialize the game when the page loads
+        window.onload = init;
+    </script>
+
+              
+          
+                
+          
+              
+</body></html>
